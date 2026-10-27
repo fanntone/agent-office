@@ -14,9 +14,10 @@
   const OY = WALL + MARGIN;
 
   const INK = '#4A3B35';
-  const SKIN = '#FFE0C2';
-  const BLUSH = '#F7B7A3';
+  const SKINS = ['#FFE0C2', '#F5CBA7', '#E0AC80', '#B97F57', '#8D5A3B'];
+  const BLUSH = 'rgba(236, 120, 105, .45)';         // see-through, so it reads on every skin
   const HAIR = ['#5B3A29', '#2F2A28', '#D9A55B', '#8B5A3C', '#C9746B', '#6B4F7A'];
+  const HAIR_STYLES = ['fringe', 'side', 'long', 'bun'];
   const KINDS = {
     claude: { main: '#D97757', dark: '#B85C3E' },
     strata: { main: '#14B8A6', dark: '#0F766E' },
@@ -59,16 +60,88 @@
     return h;
   }
 
+  // a person's looks from their id: hash() alone leaves its low bits tied to the id's last characters,
+  // so the bits are stirred first (murmur3's finaliser) and each feature takes its own slice of them
+  function lookOf(id) {
+    let m = hash(id);
+    m = Math.imul(m ^ (m >>> 16), 0x85ebca6b) >>> 0;
+    m = Math.imul(m ^ (m >>> 13), 0xc2b2ae35) >>> 0;
+    m = (m ^ (m >>> 16)) >>> 0;
+    return {
+      skin: SKINS[m % SKINS.length],
+      hair: HAIR[(m >>> 4) % HAIR.length],
+      hairStyle: HAIR_STYLES[(m >>> 8) % HAIR_STYLES.length],
+      glasses: (m >>> 12) % 4 === 0,
+    };
+  }
+
   // ---- the room
+  const WOOD = ['#E8D2B0', '#E2C9A4', '#EBD8BA'];
+  const SLAB = 12;                                     // the floor's thickness at its front edges
+  const THICK = 0.15;                                  // the walls' thickness, in cells
+
+  // the sky outside for an hour of the day
+  function skyAt(hour) {
+    if (hour === 6) return 'dawn';
+    if (hour >= 7 && hour < 17) return 'day';
+    if (hour >= 17 && hour < 19) return 'dusk';
+    return 'night';
+  }
+
   function floor(ctx) {
+    // the floor's front edges, so the room sits like a model on the page
+    poly(ctx, [P(0, H), P(W, H), P(W, H, -SLAB), P(0, H, -SLAB)], '#B98B5E');
+    poly(ctx, [P(W, 0), P(W, H), P(W, H, -SLAB), P(W, 0, -SLAB)], '#A57A4F');
     for (let x = 0; x < W; x++) {
       for (let y = 0; y < H; y++) {
-        const rug = x >= 12 && y >= 6 && y <= 10;
-        const wood = (x + y) % 2 ? '#EAD7BA' : '#E4CEAD';
-        poly(ctx, [P(x, y), P(x + 1, y), P(x + 1, y + 1), P(x, y + 1)], rug ? ((x + y) % 2 ? '#D3EBDD' : '#CAE5D4') : wood, 'rgba(150,110,70,.18)', 1);
+        if (x >= 12 && y <= 5) {                       // the coffee corner is tiled
+          poly(ctx, [P(x, y), P(x + 1, y), P(x + 1, y + 1), P(x, y + 1)], (x + y) % 2 ? '#F4EFE6' : '#E6DED0', 'rgba(120,100,80,.25)', 1);
+          continue;
+        }
+        // wooden planks along x, three to a cell, the seams staggered from row to row
+        for (let k = 0; k < 3; k++) {
+          const y0 = y + k / 3, y1 = y + (k + 1) / 3;
+          const tone = WOOD[hash(`${(x + k * 2 + y * 3) >> 1},${y},${k}`) % WOOD.length];
+          poly(ctx, [P(x, y0), P(x + 1, y0), P(x + 1, y1), P(x, y1)], tone, null);
+        }
+        ctx.strokeStyle = 'rgba(150,110,70,.22)'; ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let k = 1; k < 3; k++) { ctx.moveTo(...P(x, y + k / 3)); ctx.lineTo(...P(x + 1, y + k / 3)); }
+        const seam = (x + y) % 3;                      // one plank in three ends at this cell's edge
+        ctx.moveTo(...P(x, y + seam / 3)); ctx.lineTo(...P(x, y + (seam + 1) / 3));
+        ctx.stroke();
       }
     }
+    // the lounge rug: a border round a soft middle
+    poly(ctx, [P(12.2, 6.2), P(15.8, 6.2), P(15.8, 10.8), P(12.2, 10.8)], '#9CCFB4', INK, 1.5);
+    poly(ctx, [P(12.45, 6.45), P(15.55, 6.45), P(15.55, 10.55), P(12.45, 10.55)], '#CDE8D8', 'rgba(255,255,255,.7)', 1.5);
     poly(ctx, [P(0, 0), P(W, 0), P(W, H), P(0, H)], null, INK, 2);
+  }
+
+  // the view out of a window from u = a to b on the back wall: sky for the hour, a skyline, clouds or stars
+  function windowView(ctx, a, b, sky, now) {
+    const SKY = { dawn: '#F9D9B9', day: '#BFE3F5', dusk: '#F4A97A', night: '#26324F' };
+    const CITY = { dawn: '#C9A99A', day: '#9FC3D9', dusk: '#B5706A', night: '#1B2338' };
+    ctx.fillStyle = SKY[sky]; ctx.fillRect(a, 42, b - a, 58);
+    if (sky === 'night') {
+      ctx.fillStyle = '#FFFFFF';
+      for (let i = 0; i < 6; i++) ctx.fillRect(a + 0.15 + ((i * 0.37) % (b - a - 0.3)), 78 + ((i * 13) % 18), 0.03, 1.5);
+    } else {
+      ctx.fillStyle = 'rgba(255,255,255,.85)';
+      const drift = ((now / 60000) % 1) * (b - a - 1.2);           // a cloud that crosses in a minute
+      ctx.beginPath(); ctx.ellipse(a + 0.6 + drift, 84, 0.35, 6, 0, 0, Math.PI * 2); ctx.ellipse(a + 0.9 + drift, 87, 0.3, 5, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    // buildings along the bottom; their windows light up after dark
+    for (let i = 0, u = a; u < b - 0.05; i++) {
+      const w = Math.min(0.28 + (hash(`${a}:${i}`) % 3) * 0.08, b - u);
+      const h = 10 + hash(`${a}:${i}:h`) % 22;
+      ctx.fillStyle = CITY[sky]; ctx.fillRect(u, 42, w, h);
+      if (sky === 'night' || sky === 'dusk') {
+        ctx.fillStyle = '#F6D57A';
+        for (let v = 46; v < 42 + h - 3; v += 6) if (hash(`${a}:${i}:${v}`) % 3) ctx.fillRect(u + w * 0.3, v, w * 0.25, 2.5);
+      }
+      u += w + 0.03;
+    }
   }
 
   // draws on a wall as if it were flat paper: u along the wall in cells, v up in pixels
@@ -81,21 +154,34 @@
     ctx.restore();
   }
 
-  function walls(ctx, now) {
+  function walls(ctx, now, counts) {
+    // the walls' tops and open ends show their thickness
+    poly(ctx, [P(0, 0, WALL), P(0, H, WALL), P(-THICK, H, WALL), P(-THICK, -THICK, WALL)], '#E8D2B8');
+    poly(ctx, [P(0, 0, WALL), P(W, 0, WALL), P(W, -THICK, WALL), P(-THICK, -THICK, WALL)], '#EEDCC4');
+    poly(ctx, [P(0, H), P(-THICK, H), P(-THICK, H, WALL), P(0, H, WALL)], '#D9BFA0');
+    poly(ctx, [P(W, 0), P(W, -THICK), P(W, -THICK, WALL), P(W, 0, WALL)], '#CDB194');
     poly(ctx, [P(0, 0), P(0, H), P(0, H, WALL), P(0, 0, WALL)], '#F3E1CB');
     poly(ctx, [P(0, 0), P(W, 0), P(W, 0, WALL), P(0, 0, WALL)], '#FBEEDC');
+    // wainscot panels up to a rail, over the skirting
+    poly(ctx, [P(0, 0), P(0, H), P(0, H, 40), P(0, 0, 40)], '#E6CDAE', null);
+    poly(ctx, [P(0, 0), P(W, 0), P(W, 0, 40), P(0, 0, 40)], '#EED8BC', null);
+    ctx.strokeStyle = 'rgba(150,110,70,.35)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let u = 1; u < H; u++) { ctx.moveTo(...P(0, u, 10)); ctx.lineTo(...P(0, u, 38)); }
+    for (let u = 1; u < W; u++) { ctx.moveTo(...P(u, 0, 10)); ctx.lineTo(...P(u, 0, 38)); }
+    ctx.stroke();
+    poly(ctx, [P(0, 0, 38), P(0, H, 38), P(0, H, 42), P(0, 0, 42)], '#C9A27A', INK, 1);
+    poly(ctx, [P(0, 0, 38), P(W, 0, 38), P(W, 0, 42), P(0, 0, 42)], '#D4AE86', INK, 1);
     poly(ctx, [P(0, 0), P(0, H), P(0, H, 8), P(0, 0, 8)], '#D9BFA0', INK, 1);
     poly(ctx, [P(0, 0), P(W, 0), P(W, 0, 8), P(0, 0, 8)], '#E3CBAD', INK, 1);
     ctx.lineJoin = 'round';
+    const sky = skyAt(new Date(now).getHours());
 
-    // two windows with sky and a cloud on the back-right wall
+    // two windows onto the city on the back-right wall
     onWall(ctx, 'right', () => {
       for (const [a, b] of [[4.3, 6.7], [7.3, 9.7]]) {
         ctx.lineWidth = 0.05;
-        ctx.fillStyle = '#BFE3F5';
-        ctx.fillRect(a, 42, b - a, 58);
-        ctx.fillStyle = 'rgba(255,255,255,.85)';
-        ctx.beginPath(); ctx.ellipse(a + 0.7, 80, 0.35, 7, 0, 0, Math.PI * 2); ctx.ellipse(a + 1.0, 83, 0.3, 6, 0, 0, Math.PI * 2); ctx.fill();
+        windowView(ctx, a, b, sky, now);
         ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(a - 0.08, 38, b - a + 0.16, 4);
         ctx.fillRect(a - 0.08, 100, b - a + 0.16, 4);
@@ -107,6 +193,12 @@
       ctx.fillStyle = '#FFFFFF'; ctx.fillRect(10.25, 58, 0.55, 30);
       ctx.fillStyle = '#F4A261'; ctx.fillRect(10.32, 62, 0.41, 22);
       ctx.fillStyle = '#2A9D8F'; ctx.beginPath(); ctx.moveTo(10.32, 62); ctx.lineTo(10.52, 76); ctx.lineTo(10.73, 62); ctx.fill();
+      // a chalkboard menu over the coffee machine
+      ctx.fillStyle = '#B98B5E'; ctx.fillRect(12.75, 62, 1.5, 40);
+      ctx.fillStyle = '#2F4F46'; ctx.fillRect(12.82, 65, 1.36, 34);
+      ctx.fillStyle = 'rgba(255,255,255,.75)';          // chalk lines (a stroke here would be a hairline: v is in pixels)
+      for (const [v, len] of [[92, 0.9], [85, 0.7], [79, 1.0], [73, 0.6]]) ctx.fillRect(12.98, v, len, 1.5);
+      ctx.fillStyle = '#F6BD60'; ctx.beginPath(); ctx.ellipse(13.95, 75, 0.1, 4, 0, 0, Math.PI * 2); ctx.fill();
     });
 
     onWall(ctx, 'left', () => {
@@ -114,13 +206,28 @@
       ctx.fillStyle = '#B98B5E'; ctx.fillRect(9.55, 0, 0.9, 82);
       ctx.fillStyle = '#A57A4F'; ctx.fillRect(9.62, 6, 0.76, 34); ctx.fillRect(9.62, 44, 0.76, 32);
       ctx.fillStyle = '#F2C14E'; ctx.beginPath(); ctx.ellipse(10.3, 40, 0.06, 3, 0, 0, Math.PI * 2); ctx.fill();
-      // a whiteboard with someone's scribbles
+      // the whiteboard keeps score: a bar each for working, waiting for you and asleep, one step per person.
+      // Along this wall u grows towards the viewer, i.e. to the left on screen, so the bars start at the high end.
       ctx.fillStyle = '#FFFFFF'; ctx.fillRect(6.4, 34, 2.4, 52);
       ctx.fillStyle = '#9CA3AF'; ctx.fillRect(6.4, 30, 2.4, 4);
-      // a little chart; line width is in wall units, where 0.04 of a cell is about a pixel and a half
-      ctx.strokeStyle = '#2A9D8F'; ctx.lineWidth = 0.04;
-      ctx.beginPath(); ctx.moveTo(6.7, 70); ctx.lineTo(7.4, 76); ctx.lineTo(8.1, 66); ctx.lineTo(8.5, 72); ctx.stroke();
-      ctx.fillStyle = '#E76F51'; ctx.fillRect(6.7, 50, 0.9, 3); ctx.fillRect(6.7, 44, 1.4, 3);
+      [[counts.working, '#2A9D8F', 72], [counts.waiting, '#E76F51', 59], [counts.sleeping, '#60A5FA', 46]].forEach(([n, col, v]) => {
+        ctx.fillStyle = col;
+        ctx.beginPath(); ctx.ellipse(8.58, v + 2.5, 0.07, 3, 0, 0, Math.PI * 2); ctx.fill();
+        const len = n ? Math.min(1.85, n * 0.3) : 0.15;
+        if (!n) ctx.fillStyle = '#E5E7EB';
+        ctx.fillRect(8.4 - len, n ? v : v + 2, len, n ? 5 : 1.5);
+      });
+      // a corkboard of sticky notes by the whiteboard
+      ctx.fillStyle = '#B98B5E'; ctx.fillRect(5.15, 46, 1.0, 36);
+      ctx.fillStyle = '#D9A86C'; ctx.fillRect(5.2, 49, 0.9, 30);
+      for (const [u, v, col] of [[5.28, 66, '#FDE68A'], [5.62, 69, '#BFDBFE'], [5.4, 54, '#FBCFE8'], [5.75, 57, '#BBF7D0']]) {
+        ctx.fillStyle = col; ctx.fillRect(u, v, 0.26, 9);
+      }
+      // a framed poster past the door
+      ctx.fillStyle = '#FFFFFF'; ctx.fillRect(11.0, 50, 0.8, 40);
+      ctx.fillStyle = '#E9C46A'; ctx.fillRect(11.07, 54, 0.66, 32);
+      ctx.fillStyle = '#E76F51'; ctx.beginPath(); ctx.ellipse(11.4, 74, 0.18, 7, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#264653'; ctx.fillRect(11.07, 54, 0.66, 8);
       // the wall clock shows the real time
       const cx = 1.9, cy = 86;
       ctx.fillStyle = '#FFFFFF'; ctx.beginPath(); ctx.ellipse(cx, cy, 0.5, 16, 0, 0, Math.PI * 2); ctx.fill();
@@ -137,19 +244,96 @@
   }
 
   // ---- furniture
+  const GLOW = { tool: 'rgba(125, 211, 252, .9)', thinking: 'rgba(252, 211, 77, .9)' };
+
+  // the little things on a desk top (z = 26), each standing at (x, y): front-left and front-right
+  const TOP = 26;
+  const DESK_ITEM = {
+    mug(ctx, x, y) { box(ctx, x, y, 0.18, 0.18, 9, shade('#6B4226', '#F1F5F9', '#D1D5DB'), TOP); },
+    plant(ctx, x, y) {
+      box(ctx, x, y, 0.2, 0.2, 7, shade('#C2410C', '#E07A4F', '#C2643D'), TOP);
+      const [px, py] = P(x + 0.1, y + 0.1, TOP + 10);
+      ctx.fillStyle = '#6BAA75'; ctx.strokeStyle = INK; ctx.lineWidth = 1.2;
+      for (const [dx, dy] of [[-3, 0], [3, 0], [0, -4]]) { ctx.beginPath(); ctx.arc(px + dx, py + dy, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+    },
+    books(ctx, x, y) {
+      ['#E76F51', '#2A9D8F', '#E9C46A'].forEach((col, k) => box(ctx, x - k * 0.02, y + k * 0.02, 0.32, 0.22, 3, shade(col, col, col), TOP + k * 3));
+    },
+    pens(ctx, x, y) {
+      ctx.lineWidth = 2; ctx.lineCap = 'round';
+      [['#E76F51', -2], ['#2563EB', 1], ['#16A34A', 3]].forEach(([col, dx]) => {
+        const [px, py] = P(x + 0.07, y + 0.07, TOP + 8);
+        ctx.strokeStyle = col; ctx.beginPath(); ctx.moveTo(px + dx, py); ctx.lineTo(px + dx * 1.6, py - 8); ctx.stroke();
+      });
+      box(ctx, x, y, 0.14, 0.14, 9, shade('#334155', '#475569', '#334155'), TOP);
+    },
+    duck(ctx, x, y) {
+      const [px, py] = P(x + 0.1, y + 0.1, TOP);
+      ctx.fillStyle = '#FACC15'; ctx.strokeStyle = INK; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.ellipse(px, py - 4, 6, 4, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(px - 3, py - 10, 3.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#F97316'; ctx.fillRect(px - 8, py - 10, 3, 2);
+    },
+    donut(ctx, x, y) {
+      const [px, py] = P(x + 0.1, y + 0.1, TOP);
+      ctx.strokeStyle = INK; ctx.lineWidth = 1.2;
+      ctx.fillStyle = '#FFFFFF'; ctx.beginPath(); ctx.ellipse(px, py - 1, 9, 4.5, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#F9A8D4'; ctx.beginPath(); ctx.ellipse(px, py - 3, 5.5, 3, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#DDB98F'; ctx.beginPath(); ctx.ellipse(px, py - 3, 1.8, 1, 0, 0, Math.PI * 2); ctx.fill();
+    },
+    cactus(ctx, x, y) {
+      box(ctx, x, y, 0.16, 0.16, 6, shade('#E9C46A', '#D9A84E', '#C2923E'), TOP);
+      const [px, py] = P(x + 0.08, y + 0.08, TOP + 6);
+      ctx.fillStyle = '#4D9A5B'; ctx.strokeStyle = INK; ctx.lineWidth = 1.2;
+      rrect(ctx, px - 3, py - 13, 6, 13, 3); ctx.fill(); ctx.stroke();
+      rrect(ctx, px + 2, py - 9, 4, 5, 2); ctx.fill(); ctx.stroke();
+    },
+    notes(ctx, x, y) {
+      box(ctx, x, y, 0.2, 0.2, 3, shade('#FDE68A', '#FCD34D', '#F59E0B'), TOP);
+      box(ctx, x + 0.25, y - 0.02, 0.2, 0.2, 2, shade('#BFDBFE', '#93C5FD', '#60A5FA'), TOP);
+    },
+  };
+  const LEFT_ITEMS = ['mug', 'plant', 'books', 'pens'];
+  const RIGHT_ITEMS = ['duck', 'donut', 'cactus', 'notes'];
+
+  // what stands on desk number i: the left thing cycles desk by desk, the right one every second desk,
+  // so no two desks of the nine but the first and the last are alike
+  function deskItems(i) {
+    return [LEFT_ITEMS[i % LEFT_ITEMS.length], RIGHT_ITEMS[Math.floor(i / 2) % RIGHT_ITEMS.length]];
+  }
+
+  // the whiteboard's numbers: who is working, who waits for you, who sleeps
+  function tally(people) {
+    const n = { working: 0, waiting: 0, sleeping: 0 };
+    for (const c of people) {
+      if (c.state === 'tool' || c.state === 'thinking') n.working++;
+      else if (c.state === 'waiting') n.waiting++;
+      else if (c.state === 'sleeping') n.sleeping++;
+    }
+    return n;
+  }
+
   const FURNITURE_DRAW = {
-    desk(ctx, f, occupied) {
+    // `state` is what the person at this desk is doing, or null when nobody works there
+    desk(ctx, f, state) {
       const [[c, r]] = f.cells;
+      const i = World.DESKS.findIndex((d) => d.x === c && d.y === r);
       box(ctx, c + 0.06, r + 0.12, 1.88, 0.76, 26, shade('#DDB98F', '#C29466', '#AD8053'));
+      // a drawer on the front, with a knob
+      poly(ctx, [P(c + 1.3, r + 0.88, 6), P(c + 1.86, r + 0.88, 6), P(c + 1.86, r + 0.88, 20), P(c + 1.3, r + 0.88, 20)], '#B98A5C', INK, 1);
+      const [kx, ky] = P(c + 1.58, r + 0.88, 13);
+      ctx.fillStyle = '#F2C14E'; ctx.beginPath(); ctx.arc(kx, ky, 1.6, 0, Math.PI * 2); ctx.fill();
       box(ctx, c + 0.22, r + 0.2, 0.58, 0.26, 2, shade('#F8FAFC', '#CBD5E1', '#CBD5E1'), 26);   // keyboard
       box(ctx, c + 1.42, r + 0.38, 0.16, 0.16, 8, shade('#64748B', '#475569', '#475569'), 26); // monitor stand
       box(ctx, c + 1.12, r + 0.3, 0.76, 0.1, 30, shade('#475569', '#CBD5E1', '#94A3B8'), 34);  // monitor (its back to us)
-      if (occupied) {
+      if (GLOW[state]) {                               // the screen's light spills over its top edge
         const [x1, y1] = P(c + 1.14, r + 0.3, 66), [x2, y2] = P(c + 1.86, r + 0.3, 66);
-        ctx.strokeStyle = 'rgba(125, 211, 252, .9)'; ctx.lineWidth = 3;
+        ctx.strokeStyle = GLOW[state]; ctx.lineWidth = 3;
         ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
       }
-      box(ctx, c + 0.3, r + 0.5, 0.18, 0.18, 9, shade('#FFFFFF', '#E5E7EB', '#D1D5DB'), 26);    // a mug
+      const [left, right] = deskItems(i);
+      DESK_ITEM[left](ctx, c + 0.3, r + 0.55);
+      DESK_ITEM[right](ctx, c + 1.45, r + 0.6);
     },
     rack(ctx, f, _, now, robot) {
       box(ctx, 0.08, 3.08, 0.84, 1.84, 96, shade('#475569', '#334155', '#1E293B'));
@@ -176,10 +360,21 @@
         }
       }
     },
-    coffee(ctx) {
+    coffee(ctx, f, _, now, robot, counts) {
       box(ctx, 13.05, 0.08, 0.9, 0.8, 34, shade('#E5E7EB', '#CBD5E1', '#94A3B8'));
       box(ctx, 13.2, 0.15, 0.6, 0.45, 30, shade('#E76F51', '#D4583B', '#B9472D'), 34);
       box(ctx, 13.62, 0.62, 0.14, 0.14, 8, shade('#FFFFFF', '#F1F5F9', '#E2E8F0'), 34);
+      if (counts.waiting) {                            // someone is waiting for you: a fresh cup steams
+        const [sx, sy] = P(13.69, 0.69, 44);
+        ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 2.5;
+        for (let k = 0; k < 2; k++) {
+          const p = ((now / 1600) + k * 0.5) % 1;
+          ctx.globalAlpha = 1 - p;
+          ctx.beginPath(); ctx.moveTo(sx - 2 + k * 4, sy - p * 14);
+          ctx.quadraticCurveTo(sx + 2 + k * 4, sy - 5 - p * 14, sx - 2 + k * 4, sy - 10 - p * 14); ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
     },
     cooler(ctx) {
       box(ctx, 15.15, 0.15, 0.7, 0.7, 50, shade('#F8FAFC', '#E2E8F0', '#CBD5E1'));
@@ -227,7 +422,7 @@
   function character(ctx, c, now) {
     const [X, Y0] = P(c.x + 0.5, c.y + 0.5);
     const look = KINDS[c.kind] || KINDS.claude;
-    const hair = HAIR[hash(c.id) % HAIR.length];
+    const { skin, hair, hairStyle, glasses } = lookOf(c.id);
     const t = c.phase;
     const walking = c.pose === 'walk';
     const dozing = c.pose === 'doze';                 // asleep over its desk
@@ -259,7 +454,7 @@
     ctx.fillStyle = look.main;
     rrect(ctx, X - 11, Y - 28, 22, 20, 8); ctx.fill(); ctx.stroke();
     // arms: typing, a hand on the chin when thinking, a mug while waiting, swinging when walking
-    const arm = (ax, ay) => { ctx.fillStyle = SKIN; ctx.beginPath(); ctx.arc(ax, ay, 3.6, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); };
+    const arm = (ax, ay) => { ctx.fillStyle = skin; ctx.beginPath(); ctx.arc(ax, ay, 3.6, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); };
     if (dozing) {                                      // arms folded on the desk as a pillow
       arm(X - 8, Y - 13);
       arm(X + 8, Y - 13);
@@ -287,12 +482,19 @@
       ctx.fillStyle = look.main;
       ctx.beginPath(); ctx.arc(HX, HY + 2, 17, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     }
-    ctx.fillStyle = front ? SKIN : hair;
+    // hair that shows behind the head: long hair down to the shoulders, or a bun on top
+    ctx.fillStyle = hair;
+    if (hairStyle === 'long') { rrect(ctx, HX - 15, HY - 10, 30, 26, 12); ctx.fill(); ctx.stroke(); }
+    if (hairStyle === 'bun') { ctx.beginPath(); ctx.arc(HX, HY - 15, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+    ctx.fillStyle = front ? skin : hair;
     ctx.beginPath(); ctx.arc(HX, HY, 14, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     if (front) {
-      // fringe
+      // fringe: straight across, or swept to one side
       ctx.fillStyle = hair;
-      ctx.beginPath(); ctx.arc(HX, HY - 2, 14, Math.PI * 1.08, Math.PI * 1.92); ctx.quadraticCurveTo(HX, HY - 6, HX - 13.4, HY - 6); ctx.fill();
+      ctx.beginPath(); ctx.arc(HX, HY - 2, 14, Math.PI * 1.08, Math.PI * 1.92);
+      if (hairStyle === 'side') ctx.quadraticCurveTo(HX - 2, HY - 3, HX - 13.6, HY + 1);
+      else ctx.quadraticCurveTo(HX, HY - 6, HX - 13.4, HY - 6);
+      ctx.fill();
       // face
       const ex = side * 2;
       const blink = (t % 4) < 0.13 || asleep;
@@ -300,6 +502,13 @@
       for (const dx of [-5, 5]) {
         if (blink) { ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(HX + dx + ex, HY + 1, 2.4, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke(); }
         else { ctx.beginPath(); ctx.arc(HX + dx + ex, HY + 1, 2.2, 0, Math.PI * 2); ctx.fill(); }
+      }
+      if (glasses) {
+        ctx.lineWidth = 1.3;
+        ctx.beginPath();
+        for (const dx of [-5, 5]) { ctx.moveTo(HX + dx + ex + 3.8, HY + 1); ctx.arc(HX + dx + ex, HY + 1, 3.8, 0, Math.PI * 2); }
+        ctx.moveTo(HX + ex - 1.2, HY + 1); ctx.lineTo(HX + ex + 1.2, HY + 1);
+        ctx.stroke();
       }
       ctx.fillStyle = BLUSH;
       for (const dx of [-9, 9]) { ctx.beginPath(); ctx.arc(HX + dx + ex, HY + 6, 2.6, 0, Math.PI * 2); ctx.fill(); }
@@ -437,17 +646,19 @@
   // ---- the whole scene, back to front; `selected` is the id whose card is open, or 'robot'
   function draw(ctx, office, now, selected) {
     ctx.clearRect(0, 0, SCENE_W, SCENE_H);
-    floor(ctx);
-    walls(ctx, now);
     const people = office.characters();
-    const occupied = new Set(people.filter((c) => c.pose === 'sit').map((c) => `${c.x},${c.y}`));
+    const counts = tally(people);
+    floor(ctx);
+    walls(ctx, now, counts);
+    // who works at which seat: their state lights that desk's screen
+    const working = new Map(people.filter((c) => c.pose === 'sit').map((c) => [`${c.x},${c.y}`, c.state]));
     const items = [];
     // depth = x + y of the thing's centre: larger is nearer the viewer
     for (const f of World.FURNITURE) {
       const cx = f.cells.reduce((s, [x]) => s + x, 0) / f.cells.length + 0.5;
       const cy = f.cells.reduce((s, [, y]) => s + y, 0) / f.cells.length + 0.5;
-      const busy = f.kind === 'desk' && occupied.has(`${f.cells[0][0]},${f.cells[0][1] - 1}`);
-      items.push({ depth: cx + cy, draw: () => FURNITURE_DRAW[f.kind](ctx, f, busy, now, office.robot) });
+      const state = f.kind === 'desk' ? working.get(`${f.cells[0][0]},${f.cells[0][1] - 1}`) || null : null;
+      items.push({ depth: cx + cy, draw: () => FURNITURE_DRAW[f.kind](ctx, f, state, now, office.robot, counts) });
     }
     for (const d of World.DESKS) items.push({ depth: d.seat.x + d.seat.y + 0.8, draw: () => chair(ctx, d.seat) });
     World.NAP_SPOTS.forEach((p, i) => items.push({ depth: p.x + p.y + 0.8, draw: () => beanbag(ctx, p, i) }));
@@ -487,5 +698,5 @@
     return best;
   }
 
-  root.Draw = { draw, hit, SCENE_W, SCENE_H };
+  root.Draw = { draw, hit, skyAt, tally, deskItems, lookOf, SCENE_W, SCENE_H };
 })(typeof window !== 'undefined' ? window : globalThis);

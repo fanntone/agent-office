@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node tools/office.js start",
-    "test": "node test/agents.test.js && node test/world.test.js && node test/sim.test.js && node test/panel.test.js && node test/page.test.js && node test/e2e.test.js && node test/launcher.test.js",
+    "test": "node test/agents.test.js && node test/world.test.js && node test/sim.test.js && node test/panel.test.js && node test/draw.test.js && node test/page.test.js && node test/e2e.test.js && node test/launcher.test.js",
     "stop": "node tools/office.js stop"
   }
 }
