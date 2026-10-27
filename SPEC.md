@@ -7,6 +7,8 @@
 
 1. **對話紀錄**：`~/.claude/projects/<資料夾>/<sessionId>.jsonl`。Claude Code 與 claude-local（Strata agent）
    每做一步就寫一行 JSON。我們只讀，不寫。
+   subagent 各自一個檔：`<資料夾>/<sessionId>/subagents/agent-<agentId>.jsonl`（workflow 開的再深一兩層，
+   在 `subagents/workflows/<id>/` 底下），旁邊的 `agent-<agentId>.meta.json` 做完時會有 `"finished": true`。
 2. **Strata 伺服器**：`GET {STRATA_URL}/metrics`，看 `live.state` 等欄位。
 
 ## 一行紀錄長這樣（只列會用到的欄位）
@@ -45,7 +47,8 @@ model 含 `qwen`（不分大小寫）→ `'strata'`，其他（包含沒有 mode
 
 ```js
 {
-  id,            // sessionId（取最後一筆有 sessionId 的行）
+  id,            // 有頂層 agentId 的（subagent）用 agentId；否則用 sessionId（取最後一筆有它的行）。
+                 // subagent 每行的 sessionId 是父對話的，不能拿來當 id
   kind,          // kindOf(最後一筆有 model 的 assistant 行的 model)
   model,         // 那個 model 字串，沒有就是 null
   project,       // cwd 的最後一段資料夾名（最後一筆有 cwd 的行），沒有就是 null
@@ -73,12 +76,13 @@ model 含 `qwen`（不分大小寫）→ `'strata'`，其他（包含沒有 mode
 ## lib/scan.js
 
 ### `scan(projectsDir, now, readTailBytes = 262144)` → agent 陣列
-- 列出 `projectsDir` 底下每個子資料夾裡的 `*.jsonl`。
+- 列出 `projectsDir` 底下每個子資料夾裡的 `*.jsonl`，以及每個 `<子資料夾>/<名字>/subagents/` 底下（含更深的資料夾）的 `*.jsonl`。
+- subagent 的 `.meta.json` 寫著 `finished: true` → 不算（人物走出門）；沒有 meta 檔或沒寫 → 還在工作。
 - 只看修改時間在 `now` 往前 60 分鐘內的檔案。
 - 每個檔案只讀**最後** `readTailBytes` 個位元組，切成行交給 `parseSession`。
 - 去掉 `null`，依 `lastAt` 新到舊排序。
 - `projectsDir` 不存在 → 回空陣列。
-- 讀不到的項目**跳過，不讓整個掃描失敗**：列出後才被刪掉的檔案或資料夾（`ENOENT`）、名字是 `*.jsonl`
+- 讀不到的項目**跳過，不讓整個掃描失敗**：列出後才被刪掉的檔案或資料夾（`ENOENT`）、不是資料夾的路徑（`ENOTDIR`）、名字是 `*.jsonl`
   的資料夾（`EISDIR`）、沒權限（`EACCES`、`EPERM`）。其他錯誤照常拋出。
 
 ## server.js

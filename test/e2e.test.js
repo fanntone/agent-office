@@ -85,6 +85,22 @@ const entry = (o) => JSON.stringify({ sessionId: 'e2e-1', cwd: 'C:\\work\\demo',
       assert.strictEqual(a.recent.length, 2);
     });
 
+    await run('subagents sit beside their parent, then walk out when finished', async () => {
+      const dir = path.join(projects, 'C--work-demo', 'e2e-1', 'subagents');
+      fs.mkdirSync(dir, { recursive: true });
+      for (const id of ['sub-1', 'sub-2']) {
+        fs.appendFileSync(path.join(dir, `agent-${id}.jsonl`), entry({ type: 'assistant', isSidechain: true, agentId: id,
+          message: { model: 'claude-opus-5-5', content: [{ type: 'tool_use', name: 'Read', input: { file_path: 'C:\work\demo\chunk.json' } }] } }));
+        fs.writeFileSync(path.join(dir, `agent-${id}.meta.json`), JSON.stringify({ description: id }));
+      }
+      const ids = (await getJson(`${office.url}/api/agents`)).agents.map((a) => a.id).sort();
+      assert.deepStrictEqual(ids, ['e2e-1', 'sub-1', 'sub-2']);
+      fs.writeFileSync(path.join(dir, 'agent-sub-1.meta.json'), JSON.stringify({ description: 'sub-1', finished: true }));
+      const after = (await getJson(`${office.url}/api/agents`)).agents.map((a) => a.id).sort();
+      assert.deepStrictEqual(after, ['e2e-1', 'sub-2']);
+      fs.rmSync(path.join(projects, 'C--work-demo', 'e2e-1'), { recursive: true, force: true });
+    });
+
     await run('Strata reading, then down', async () => {
       strata.metrics = { live: { state: 'reading', prompt_read: 50, prompt_total: 200 } };
       assert.strictEqual((await getJson(`${office.url}/api/agents`)).server.activity, '讀 prompt 25%');

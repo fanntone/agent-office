@@ -96,6 +96,12 @@ run('parseSession: nothing to show is null', () => {
   assert.strictEqual(A.parseSession([], T0), null);
 });
 
+run('parseSession: a subagent is its own person: id is its agentId, not the parent sessionId', () => {
+  const sub = (o) => JSON.stringify({ ...JSON.parse(o), isSidechain: true, agentId: 'a02a27af' });
+  const a = A.parseSession([sub(ask(0)), sub(toolUse(5, 'Grep', { pattern: 'Quill' }))], T0 + 6000);
+  assert.deepStrictEqual([a.id, a.project, a.state, a.activity], ['a02a27af', '五子棋', 'tool', 'Grep：Quill']);
+});
+
 run('serverState: every row of the table', () => {
   assert.deepStrictEqual(A.serverState(null), { state: 'offline', activity: '沒開機', gpuTemp: null });
   assert.deepStrictEqual(A.serverState({ live: { state: 'generating', queued: 2, tok_s: 40 }, hardware: { gpu_temp: 61 } }),
@@ -157,6 +163,31 @@ run('scan: a file deleted after it was listed is skipped; other errors still sur
     assert.throws(() => scan(root, now), /EIO/);
   } finally {
     fs.statSync = statSync;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+run('scan: subagents under <session>/subagents (and workflows) show up; finished ones leave', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'office-scan-'));
+  try {
+    const now = Date.now();
+    const write = (rel, lines) => {
+      const f = path.join(root, rel);
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      fs.writeFileSync(f, lines.join('\n') + '\n');
+    };
+    const stamp = (o, sec, extra) => JSON.stringify({ ...JSON.parse(o), timestamp: new Date(now - sec * 1000).toISOString(), ...extra });
+    const sub = (id, sec) => [stamp(toolUse(0, 'Read', { file_path: 'x.json' }), sec, { isSidechain: true, agentId: id })];
+    write('p1/s1.jsonl', [stamp(toolUse(0, 'Agent', { description: 'Translate' }), 50)]);
+    write('p1/s1/subagents/agent-a1.jsonl', sub('a1', 10));
+    write('p1/s1/subagents/agent-a1.meta.json', [JSON.stringify({ description: 'Translate chunk 1' })]);
+    write('p1/s1/subagents/agent-a2.jsonl', sub('a2', 20)); // no meta file at all: still working
+    write('p1/s1/subagents/agent-a3.jsonl', sub('a3', 5));
+    write('p1/s1/subagents/agent-a3.meta.json', [JSON.stringify({ description: 'Translate chunk 3', finished: true })]);
+    write('p1/s1/subagents/workflows/wf_1/agent-w1.jsonl', sub('w1', 30));
+    write('p1/s1/tool-results/big.jsonl', [stamp(ask(0), 1, { sessionId: 'not-a-person' })]);
+    assert.deepStrictEqual(scan(root, now).map((a) => a.id), ['a1', 'a2', 'w1', 's1']);
+  } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
