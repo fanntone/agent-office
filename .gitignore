@@ -1,0 +1,5 @@
+node_modules/
+# screenshots taken while checking the look (tools/screenshot.js): they show your own sessions
+.review/
+*.png
+*.pid

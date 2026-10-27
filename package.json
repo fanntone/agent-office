@@ -1,0 +1,15 @@
+{
+  "name": "agent-office",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A local web page that shows the running AI agents as characters in an office.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node tools/office.js start",
+    "test": "node test/agents.test.js && node test/world.test.js && node test/sim.test.js && node test/panel.test.js && node test/page.test.js && node test/e2e.test.js && node test/launcher.test.js",
+    "stop": "node tools/office.js stop"
+  }
+}

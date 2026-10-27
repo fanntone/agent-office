@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 辦公室</title>
+<link rel="stylesheet" href="/office.css">
+</head>
+<body>
+<header>
+  <h1>AI 辦公室</h1>
+  <span id="count" class="count"></span>
+  <span class="spacer"></span>
+  <span id="clock" class="clock"></span>
+</header>
+<main id="wrap"><canvas id="office" aria-label="辦公室裡的 AI 們"></canvas></main>
+<aside id="detail" class="detail" hidden>
+  <div class="detail-head"><b id="detail-title"></b><button id="detail-close" title="關閉 (Esc)">✕</button></div>
+  <dl id="detail-lines"></dl>
+  <h4 id="detail-recent-title">最近動作</h4>
+  <ol id="detail-recent"></ol>
+</aside>
+<footer>🔧 用工具　💭 思考　❗ 等你回覆　💤 睡著　·　點人物看最近動作　·　只顯示最近一小時有動作的 agent</footer>
+<script src="/world.js"></script>
+<script src="/sim.js"></script>
+<script src="/panel.js"></script>
+<script src="/draw.js"></script>
+<script src="/main.js"></script>
+</body>
+</html>
