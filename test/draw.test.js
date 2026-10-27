@@ -21,14 +21,15 @@ function run(name, fn) {
   }
 }
 
-// a canvas context that accepts every call and property, counting the calls
+// a canvas context that accepts every call and property, counting the calls and the colour of every fill()
 function fakeContext() {
-  const ctx = { calls: 0 };
+  const ctx = { calls: 0, fills: [] };
   return new Proxy(ctx, {
     get(target, key) {
       if (key in target) return target[key];
       if (key === 'measureText') return (s) => ({ width: String(s).length * 7 });
       if (key === 'createLinearGradient' || key === 'createRadialGradient') return () => ({ addColorStop() {} });
+      if (key === 'fill') return () => { target.calls++; target.fills.push(target.fillStyle); };
       return () => { target.calls++; };
     },
     set(target, key, value) { target[key] = value; return true; },
@@ -92,6 +93,20 @@ run('workPose: typing for most tools, reading for the ones that look things up, 
   assert.strictEqual(at('walk', 'tool', 'Bash：Run tests'), null, 'walking to the desk');
   assert.strictEqual(at('doze', 'sleeping', '睡著了'), null);
   assert.strictEqual(at('stand', 'waiting', '等你回覆'), null);
+});
+
+run('a seated person still has legs: the desk does not always hide where they would be', () => {
+  const LEGS = '#475569';
+  const legFills = (agents) => {
+    const o = new Office({ rng: rng() });
+    o.update({ at: 0, server: { state: 'idle', activity: '待命', gpuTemp: 50 }, agents });
+    const ctx = fakeContext();
+    Draw.draw(ctx, o, new Date(2026, 9, 27, 12, 0).getTime(), null);
+    return ctx.fills.filter((f) => f === LEGS).length;
+  };
+  const empty = legFills([]);
+  assert.ok(legFills([{ ...agent('s', 'tool'), activity: 'Bash：npm test' }]) - empty >= 2, 'typing at the desk');
+  assert.ok(legFills([agent('z', 'sleeping')]) - empty >= 2, 'dozing at the desk');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

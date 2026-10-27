@@ -491,10 +491,18 @@
     },
   };
 
+  // an office chair drawn facing the viewer, the way the people are: a backrest centred behind where the body
+  // goes, a seat under it, one post on a round base. Pulled up to the desk like whoever sits on it.
   function chair(ctx, seat) {
-    const y = seat.y + SEAT_FORWARD;                   // pulled up to the desk, like whoever sits on it
-    box(ctx, seat.x + 0.25, y + 0.3, 0.5, 0.45, 14, shade('#5EEAD4', '#2DD4BF', '#14B8A6'));
-    box(ctx, seat.x + 0.25, y + 0.15, 0.5, 0.12, 30, shade('#5EEAD4', '#2DD4BF', '#14B8A6'), 10);
+    const [X, Y0] = P(seat.x + 0.5, seat.y + 0.5 + SEAT_FORWARD);
+    ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+    ctx.fillStyle = '#64748B';
+    rrect(ctx, X - 2, Y0 - 16, 4, 13, 2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(X, Y0 - 3, 11, 4, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#5B6B82';                         // blue-grey: neither Claude's orange nor Strata's teal
+    rrect(ctx, X - 14, Y0 - 54, 28, 36, 9); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#8A9AB0';
+    ctx.beginPath(); ctx.ellipse(X, Y0 - 18, 14, 6, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   }
 
   function beanbag(ctx, p, i) {
@@ -529,8 +537,11 @@
     if (napping) { ctx.translate(X, Y); ctx.rotate(-0.25 * side); ctx.translate(-X, -Y); }
     ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
 
-    // legs, swinging when walking
-    if (!seated) {
+    // legs: seated, the thighs rest on the seat (the desk hides the rest, but not everywhere); swinging when walking
+    if (seated) {
+      ctx.fillStyle = '#475569';
+      for (const dx of [-5, 5]) { rrect(ctx, X + dx - 3.5, Y - 11, 7, 9, 3); ctx.fill(); ctx.stroke(); }
+    } else {
       const swing = walking ? Math.sin(t * 9) * 3.5 : 0;
       for (const [dx, s] of [[-5, swing], [5, -swing]]) {
         ctx.fillStyle = '#475569';
