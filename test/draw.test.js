@@ -79,6 +79,16 @@ run('lookOf: the same id always looks the same; across ids every skin, hairstyle
   assert.strictEqual(new Set(looks.map((l) => l.skin)).size, 5, 'five skin tones');
   assert.deepStrictEqual([...new Set(looks.map((l) => l.hairStyle))].sort(), ['bun', 'fringe', 'long', 'side']);
   assert.deepStrictEqual([...new Set(looks.map((l) => l.glasses))].sort(), [false, true]);
+  assert.deepStrictEqual([...new Set(looks.map((l) => l.tone))].sort(), [0, 1, 2, 3], 'four shades of their kind\'s colour');
+  assert.deepStrictEqual([...new Set(looks.map((l) => l.extra))].sort(), ['bow', 'headphones', 'none', 'scarf']);
+  assert.strictEqual(new Set(looks.filter((l) => l.extra === 'scarf').map((l) => l.scarf)).size, 5, 'five scarf colours');
+});
+
+run('lookOf: six subagents of one session (real ids) are told apart by what shows from afar', () => {
+  const ids = ['a02a27af5a74ee297', 'a10a936aecd9f575e', 'a161eb5ffa3b9c874', 'a1fdf7f170fcf5ad1', 'a53005f0bd65fdc12', 'ae2454647c50e260c'];
+  // the hood and the hat hide most hair, so the outfit shade and the accessory must differ, not just the skin
+  const far = ids.map((id) => { const l = Draw.lookOf(id); return `${l.tone}/${l.extra}/${l.scarf || ''}`; });
+  assert.ok(new Set(far).size >= 5, `outfits: ${far.join(' ')}`);
 });
 
 run('workPose: typing for most tools, reading for the ones that look things up, only while seated', () => {
@@ -107,6 +117,15 @@ run('a seated person still has legs: the desk does not always hide where they wo
   const empty = legFills([]);
   assert.ok(legFills([{ ...agent('s', 'tool'), activity: 'Bash：npm test' }]) - empty >= 2, 'typing at the desk');
   assert.ok(legFills([agent('z', 'sleeping')]) - empty >= 2, 'dozing at the desk');
+});
+
+run('seatAt / laptopAt: chair, person and laptop line up on the middle of the two-cell desk, laptop in front (+y)', () => {
+  for (const d of World.DESKS) {
+    const s = Draw.seatAt(d.seat), l = Draw.laptopAt(d);
+    assert.strictEqual(s.x, d.x + 1, `desk ${d.x},${d.y}: seated in the middle of the desk`);
+    assert.strictEqual(+(l.x + l.w / 2).toFixed(2), d.x + 1, 'laptop in the middle of the desk');
+    assert.ok(l.y > s.y && l.y + l.d < d.y + 0.88, 'in front of the seat, on the desk top');
+  }
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

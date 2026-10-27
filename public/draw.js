@@ -18,10 +18,13 @@
   const BLUSH = 'rgba(236, 120, 105, .45)';         // see-through, so it reads on every skin
   const HAIR = ['#5B3A29', '#2F2A28', '#D9A55B', '#8B5A3C', '#C9746B', '#6B4F7A'];
   const HAIR_STYLES = ['fringe', 'side', 'long', 'bun'];
+  // each kind keeps its colour; within it, four shades of hoodie/top (lookOf().tone) tell people apart
   const KINDS = {
-    claude: { main: '#D97757', dark: '#B85C3E' },
-    strata: { main: '#14B8A6', dark: '#0F766E' },
+    claude: { main: '#D97757', dark: '#B85C3E', tones: ['#D97757', '#F0A070', '#B4532F', '#E8894A'] },
+    strata: { main: '#14B8A6', dark: '#0F766E', tones: ['#14B8A6', '#6ED6C8', '#0E7F73', '#2A9FBF'] },
   };
+  const EXTRAS = ['none', 'headphones', 'scarf', 'bow'];
+  const SCARVES = ['#E63946', '#3A86FF', '#F4D35E', '#8338EC', '#FFFFFF'];
   const ICON = { tool: '🔧', thinking: '💭', waiting: '❗', sleeping: '💤', leaving: '👋' };
   const ROBOT_ICON = { generating: '✍️', reading: '📖', idle: '☕', queued: '⏳', offline: '💤' };
 
@@ -72,7 +75,16 @@
       hair: HAIR[(m >>> 4) % HAIR.length],
       hairStyle: HAIR_STYLES[(m >>> 8) % HAIR_STYLES.length],
       glasses: (m >>> 12) % 4 === 0,
+      tone: (m >>> 16) % 4,
+      extra: EXTRAS[(m >>> 19) % EXTRAS.length],
+      scarf: (m >>> 19) % EXTRAS.length === 2 ? SCARVES[(m >>> 22) % SCARVES.length] : null,
     };
+  }
+
+  // what someone wears: their kind's colour, in their own shade
+  function outfit(c) {
+    const kind = KINDS[c.kind] || KINDS.claude;
+    return kind.tones[lookOf(c.id).tone];
   }
 
   // ---- the room
@@ -317,6 +329,12 @@
   const READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'NotebookRead', 'LS']);
   const SEAT_FORWARD = 0.25;                           // a seated person pulls up to the desk, this far into the cell
 
+  // where someone sits on the floor grid, given their seat cell: the seat cell is behind the desk's left cell,
+  // so they slide half a cell along x to the middle of the two-cell desk, and pull up to it
+  function seatAt(cell) {
+    return { x: cell.x + 1, y: cell.y + 0.5 + SEAT_FORWARD };
+  }
+
   // what someone seated does with their hands: 'type', 'read' (tools that look things up), 'think', or null
   function workPose(c) {
     if (c.pose !== 'sit') return null;
@@ -338,13 +356,20 @@
 
   // where a seated person's shoulders are on screen (see character(): seated, the body is 12 px up)
   function shoulders(c) {
-    const [X, Y0] = P(c.x + 0.5, c.y + 0.5 + SEAT_FORWARD);
+    const s = seatAt(c);
+    const [X, Y0] = P(s.x, s.y);
     return [[X - 8, Y0 - 12 - 20], [X + 8, Y0 - 12 - 20]];
+  }
+
+  // the laptop on desk d, as a box on the desk top: in the middle of the desk, straight in front of the seat
+  // along +y, which is the way a seated person faces (see character()), screen turned to them, low lid to us
+  function laptopAt(d) {
+    return { x: d.x + 0.68, y: d.y + 0.24, w: 0.64, d: 0.42 };
   }
 
   // both hands on the laptop's keys, taking turns to tap
   function typingArms(ctx, c, lx, ly) {
-    const look = KINDS[c.kind] || KINDS.claude;
+    const look = { main: outfit(c) };
     const { skin } = lookOf(c.id);
     shoulders(c).forEach(([sx, sy], k) => {
       const lift = Math.sin(c.phase * 20 + k * Math.PI) > 0 ? 3 : 0;
@@ -370,7 +395,7 @@
 
   // a sheet held up over the laptop to read, turning now and then
   function readingSheet(ctx, c, lx, ly, now) {
-    const look = KINDS[c.kind] || KINDS.claude;
+    const look = { main: outfit(c) };
     const { skin } = lookOf(c.id);
     const [px, py] = P(lx + 0.3, ly + 0.15, TOP + 20);   // at chest height, under the face
     const sway = Math.sin(c.phase * 1.4) * 0.06;
@@ -400,9 +425,7 @@
       ctx.fillStyle = '#F2C14E'; ctx.beginPath(); ctx.arc(kx, ky, 1.6, 0, Math.PI * 2); ctx.fill();
       const pose = worker ? workPose(worker) : null;
       const lit = worker && worker.pose === 'sit' ? GLOW[worker.state] : null;
-      // the laptop's back-left corner on the desk top. The person is drawn facing straight down the screen,
-      // which on this grid is +x and +y alike, so the laptop sits diagonally in front of the seat, not at +y only.
-      const lx = c + 0.88, ly = r + 0.24;
+      const { x: lx, y: ly } = laptopAt(World.DESKS[i]);
       box(ctx, lx, ly, 0.64, 0.42, 2, shade('#E2E8F0', '#94A3B8', '#64748B'), TOP);
       if (pose === 'type') typingArms(ctx, worker, lx, ly);
       // the lid, leaning back from the base's front edge, a logo on its back
@@ -417,8 +440,9 @@
       if (pose === 'type') codeBits(ctx, worker, lx, ly, now);
       if (pose === 'read') readingSheet(ctx, worker, lx, ly, now);
       const [left, right] = deskItems(i);
-      DESK_ITEM[left](ctx, c + 0.25, r + 0.45);
-      DESK_ITEM[right](ctx, c + 1.62, r + 0.55);
+      // both on the left end: on screen the right half of the desk is right in front of the seated person
+      DESK_ITEM[left](ctx, c + 0.15, r + 0.15);
+      DESK_ITEM[right](ctx, c + 0.2, r + 0.58);
     },
     rack(ctx, f, _, now, robot) {
       box(ctx, 0.08, 3.08, 0.84, 1.84, 96, shade('#475569', '#334155', '#1E293B'));
@@ -491,18 +515,32 @@
     },
   };
 
-  // an office chair drawn facing the viewer, the way the people are: a backrest centred behind where the body
-  // goes, a seat under it, one post on a round base. Pulled up to the desk like whoever sits on it.
+  // an office chair turned to the desk (+y), the way whoever sits on it faces: one post on a round base,
+  // a round cushion, and a rounded backrest standing along x behind the body (up-right on screen).
+  // Soft navy: neither Claude's orange nor Strata's teal, and no light panel, which would read as a monitor.
   function chair(ctx, seat) {
-    const [X, Y0] = P(seat.x + 0.5, seat.y + 0.5 + SEAT_FORWARD);
+    const { x: sx, y: sy } = seatAt(seat);
+    const [X, Y0] = P(sx, sy);
     ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.lineJoin = 'round';
     ctx.fillStyle = '#64748B';
-    rrect(ctx, X - 2, Y0 - 16, 4, 13, 2); ctx.fill(); ctx.stroke();
-    ctx.beginPath(); ctx.ellipse(X, Y0 - 3, 11, 4, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#5B6B82';                         // blue-grey: neither Claude's orange nor Strata's teal
-    rrect(ctx, X - 14, Y0 - 54, 28, 36, 9); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#8A9AB0';
-    ctx.beginPath(); ctx.ellipse(X, Y0 - 18, 14, 6, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(X, Y0 - 2, 12, 5, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    rrect(ctx, X - 2, Y0 - 16, 4, 14, 2); ctx.fill(); ctx.stroke();
+    // the backrest: a rounded slab in the plane along x, drawn sheared so its corners stay round on that slope
+    const [bx, by] = P(sx, sy - 0.4);
+    const back = (dx, dy, fill) => {
+      ctx.save();
+      ctx.transform(1, 0.5, 0, 1, bx + dx, by + dy);   // u along x on screen (32 px right, 16 down per cell)
+      ctx.fillStyle = fill; rrect(ctx, -11, -46, 22, 30, 8); ctx.fill(); ctx.stroke();
+      ctx.restore();
+    };
+    back(3, -1.5, '#4F5F86');                          // its back, a little thickness
+    back(0, 0, '#7286B3');
+    rrect(ctx, bx - 2, by - 17, 4, 6, 1.5); ctx.fillStyle = '#64748B'; ctx.fill(); ctx.stroke();
+    // the cushion: a thick round pad
+    ctx.fillStyle = '#4F5F86';
+    ctx.beginPath(); ctx.ellipse(X, Y0 - 14, 15, 7.5, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#7286B3';
+    ctx.beginPath(); ctx.ellipse(X, Y0 - 18, 15, 7.5, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   }
 
   function beanbag(ctx, p, i) {
@@ -517,9 +555,9 @@
     const walking = c.pose === 'walk';
     const dozing = c.pose === 'doze';                 // asleep over its desk
     const seated = c.pose === 'sit' || dozing;
-    const [X, Y0] = P(c.x + 0.5, c.y + 0.5 + (seated ? SEAT_FORWARD : 0));
-    const look = KINDS[c.kind] || KINDS.claude;
-    const { skin, hair, hairStyle, glasses } = lookOf(c.id);
+    const [X, Y0] = seated ? P(seatAt(c).x, seatAt(c).y) : P(c.x + 0.5, c.y + 0.5);
+    const look = { main: outfit(c) };
+    const { skin, hair, hairStyle, glasses, extra, scarf } = lookOf(c.id);
     const work = workPose(c);
     const t = c.phase;
     const napping = c.pose === 'nap';
@@ -538,9 +576,9 @@
     ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
 
     // legs: seated, the thighs rest on the seat (the desk hides the rest, but not everywhere); swinging when walking
-    if (seated) {
+    if (seated) {                                      // turned to the desk, the thighs point down-left (+y)
       ctx.fillStyle = '#475569';
-      for (const dx of [-5, 5]) { rrect(ctx, X + dx - 3.5, Y - 11, 7, 9, 3); ctx.fill(); ctx.stroke(); }
+      for (const dx of [-5, 5]) { rrect(ctx, X + dx - 8, Y - 9, 9, 8, 3); ctx.fill(); ctx.stroke(); }
     } else {
       const swing = walking ? Math.sin(t * 9) * 3.5 : 0;
       for (const [dx, s] of [[-5, swing], [5, -swing]]) {
@@ -551,6 +589,11 @@
     // body
     ctx.fillStyle = look.main;
     rrect(ctx, X - 11, Y - 28, 22, 20, 8); ctx.fill(); ctx.stroke();
+    if (extra === 'scarf') {                           // round the neck, one end hanging down the front
+      ctx.fillStyle = scarf;
+      rrect(ctx, X + 2, Y - 26, 6, 13, 2.5); ctx.fill(); ctx.stroke();
+      rrect(ctx, X - 12, Y - 31, 24, 7, 3.5); ctx.fill(); ctx.stroke();
+    }
     // arms: a hand on the chin when thinking, a mug while waiting, swinging when walking.
     // Typing and reading arms reach over the desk, so the desk draws those (see typingArms, readingSheet).
     const arm = (ax, ay) => { ctx.fillStyle = skin; ctx.beginPath(); ctx.arc(ax, ay, 3.6, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); };
@@ -595,7 +638,7 @@
       else ctx.quadraticCurveTo(HX, HY - 6, HX - 13.4, HY - 6);
       ctx.fill();
       // face
-      const ex = side * 2;
+      const ex = seated ? -4 : side * 2;                // seated, the face turns down-left to the laptop
       const blink = (t % 4) < 0.13 || asleep;
       ctx.fillStyle = INK;
       for (const dx of [-5, 5]) {
@@ -634,6 +677,21 @@
         ctx.fillStyle = col;
         rrect(ctx, HX - 13 + i * 2, HY - 15 - i * 6, 26 - i * 4, 7, 3.5); ctx.fill(); ctx.stroke();
       });
+    }
+    if (extra === 'headphones') {                      // a band over the top, a cup on each ear
+      ctx.strokeStyle = INK; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.arc(HX, HY - 1, 17, Math.PI * 1.05, Math.PI * 1.95); ctx.stroke();
+      ctx.strokeStyle = '#334155'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(HX, HY - 1, 17, Math.PI * 1.05, Math.PI * 1.95); ctx.stroke();
+      ctx.fillStyle = '#334155'; ctx.strokeStyle = INK; ctx.lineWidth = 1.5;
+      for (const dx of [-19, 13]) { rrect(ctx, HX + dx, HY - 6, 6, 12, 3); ctx.fill(); ctx.stroke(); }
+    } else if (extra === 'bow') {                      // on the other side from the star clip
+      const bx = HX - 10 * side, by = HY - 13;
+      ctx.fillStyle = '#F472B6'; ctx.strokeStyle = INK; ctx.lineWidth = 1.5;
+      for (const d of [-1, 1]) {
+        ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + d * 8, by - 5); ctx.lineTo(bx + d * 8, by + 5); ctx.closePath(); ctx.fill(); ctx.stroke();
+      }
+      ctx.beginPath(); ctx.arc(bx, by, 2.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     }
     ctx.restore();                                     // the head's tilt
     ctx.restore();
@@ -797,5 +855,5 @@
     return best;
   }
 
-  root.Draw = { draw, hit, skyAt, tally, deskItems, lookOf, workPose, SCENE_W, SCENE_H };
+  root.Draw = { draw, hit, skyAt, tally, deskItems, lookOf, workPose, seatAt, laptopAt, SCENE_W, SCENE_H };
 })(typeof window !== 'undefined' ? window : globalThis);
