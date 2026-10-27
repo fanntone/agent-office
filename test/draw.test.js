@@ -40,7 +40,9 @@ function rng() { let s = 1; return () => (s = (s * 16807) % 2147483647) / 214748
 
 run('the scene draws everyone, in every state, by day and by night', () => {
   const o = new Office({ rng: rng() });
-  const agents = [agent('a', 'tool'), agent('b', 'thinking', 'strata'), agent('c', 'sleeping'), agent('d', 'waiting', 'strata')];
+  // with real tool names, so the typing and the reading hands both get drawn
+  const agents = [{ ...agent('a', 'tool'), activity: 'Bash：npm test' }, { ...agent('r', 'tool', 'strata'), activity: 'Read：SPEC.md' },
+    agent('b', 'thinking', 'strata'), agent('c', 'sleeping'), agent('d', 'waiting', 'strata')];
   for (let i = 0; i < 9; i++) agents.push(agent(`x${i}`, i % 2 ? 'tool' : 'sleeping'));   // more than there are desks
   o.update({ at: 0, server: { state: 'generating', activity: '寫字中', gpuTemp: 60 }, agents });
   for (let t = 0; t < 3; t += 0.05) o.step(0.05);
@@ -76,6 +78,20 @@ run('lookOf: the same id always looks the same; across ids every skin, hairstyle
   assert.strictEqual(new Set(looks.map((l) => l.skin)).size, 5, 'five skin tones');
   assert.deepStrictEqual([...new Set(looks.map((l) => l.hairStyle))].sort(), ['bun', 'fringe', 'long', 'side']);
   assert.deepStrictEqual([...new Set(looks.map((l) => l.glasses))].sort(), [false, true]);
+});
+
+run('workPose: typing for most tools, reading for the ones that look things up, only while seated', () => {
+  const at = (pose, state, activity) => Draw.workPose({ pose, state, activity });
+  assert.strictEqual(at('sit', 'tool', 'Bash：Run tests'), 'type');
+  assert.strictEqual(at('sit', 'tool', 'Edit：draw.js'), 'type');
+  assert.strictEqual(at('sit', 'tool', 'TodoWrite'), 'type');
+  assert.strictEqual(at('sit', 'tool', 'Read：SPEC.md'), 'read');
+  assert.strictEqual(at('sit', 'tool', 'Grep：kindOf'), 'read');
+  assert.strictEqual(at('sit', 'tool', 'WebFetch：github.com'), 'read');
+  assert.strictEqual(at('sit', 'thinking', '思考中'), 'think');
+  assert.strictEqual(at('walk', 'tool', 'Bash：Run tests'), null, 'walking to the desk');
+  assert.strictEqual(at('doze', 'sleeping', '睡著了'), null);
+  assert.strictEqual(at('stand', 'waiting', '等你回覆'), null);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

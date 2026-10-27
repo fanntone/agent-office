@@ -313,9 +313,84 @@
     return n;
   }
 
+  // ---- working at a desk
+  const READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'NotebookRead', 'LS']);
+  const SEAT_FORWARD = 0.25;                           // a seated person pulls up to the desk, this far into the cell
+
+  // what someone seated does with their hands: 'type', 'read' (tools that look things up), 'think', or null
+  function workPose(c) {
+    if (c.pose !== 'sit') return null;
+    if (c.state === 'thinking') return 'think';
+    if (c.state !== 'tool') return null;
+    return READ_TOOLS.has(String(c.activity || '').split('：')[0]) ? 'read' : 'type';
+  }
+
+  // a sleeve from the shoulder to a hand
+  function reach(ctx, look, skin, sx, sy, hx, hy) {
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = INK; ctx.lineWidth = 8;
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(hx, hy); ctx.stroke();
+    ctx.strokeStyle = look.main; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(hx, hy); ctx.stroke();
+    ctx.fillStyle = skin; ctx.strokeStyle = INK; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(hx, hy, 3.4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  }
+
+  // where a seated person's shoulders are on screen (see character(): seated, the body is 12 px up)
+  function shoulders(c) {
+    const [X, Y0] = P(c.x + 0.5, c.y + 0.5 + SEAT_FORWARD);
+    return [[X - 8, Y0 - 12 - 20], [X + 8, Y0 - 12 - 20]];
+  }
+
+  // both hands on the laptop's keys, taking turns to tap
+  function typingArms(ctx, c, lx, ly) {
+    const look = KINDS[c.kind] || KINDS.claude;
+    const { skin } = lookOf(c.id);
+    shoulders(c).forEach(([sx, sy], k) => {
+      const lift = Math.sin(c.phase * 20 + k * Math.PI) > 0 ? 3 : 0;
+      const [hx, hy] = P(lx + 0.2 + k * 0.24, ly + 0.2, TOP + 9 + lift);   // just showing over the lid
+      reach(ctx, look, skin, sx, sy, hx, hy);
+    });
+  }
+
+  // little lines of code float up off the screen while someone types, drifting off to the right,
+  // clear of the typist's face
+  function codeBits(ctx, c, lx, ly, now) {
+    const colors = ['#7DD3FC', '#FCD34D', '#86EFAC'];
+    const offset = (hash(c.id) % 10) / 10;
+    for (let i = 0; i < 3; i++) {
+      const p = (now / 1400 + i / 3 + offset) % 1;
+      const [bx, by] = P(lx + 0.64, ly + 0.47, TOP + 14 + p * 16);
+      ctx.globalAlpha = 1 - p;
+      ctx.fillStyle = colors[i];
+      rrect(ctx, bx + 2 + p * 14, by, 7 + (i % 2) * 5, 3, 1.5); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // a sheet held up over the laptop to read, turning now and then
+  function readingSheet(ctx, c, lx, ly, now) {
+    const look = KINDS[c.kind] || KINDS.claude;
+    const { skin } = lookOf(c.id);
+    const [px, py] = P(lx + 0.3, ly + 0.15, TOP + 20);   // at chest height, under the face
+    const sway = Math.sin(c.phase * 1.4) * 0.06;
+    ctx.save();
+    ctx.translate(px, py); ctx.rotate(-0.1 + sway);
+    ctx.fillStyle = '#FFFFFF'; ctx.strokeStyle = INK; ctx.lineWidth = 1.5;
+    rrect(ctx, -10, -13, 20, 24, 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#94A3B8';
+    for (let k = 0; k < 5; k++) ctx.fillRect(-6, -8 + k * 4, k % 2 ? 9 : 12, 1.5);
+    ctx.restore();
+    const [[lsx, lsy], [rsx, rsy]] = shoulders(c);
+    reach(ctx, look, skin, lsx, lsy, px - 10, py + 9);
+    reach(ctx, look, skin, rsx, rsy, px + 10, py + 7);
+  }
+
   const FURNITURE_DRAW = {
-    // `state` is what the person at this desk is doing, or null when nobody works there
-    desk(ctx, f, state) {
+    // `worker` is whoever sits at this desk (working or dozing), or null. The laptop stands right in front of
+    // them, its screen turned to them and its low lid to us, so it never hides their face; their arms are
+    // drawn here, between the laptop's base and its lid, because the desk would cover them otherwise.
+    desk(ctx, f, worker, now) {
       const [[c, r]] = f.cells;
       const i = World.DESKS.findIndex((d) => d.x === c && d.y === r);
       box(ctx, c + 0.06, r + 0.12, 1.88, 0.76, 26, shade('#DDB98F', '#C29466', '#AD8053'));
@@ -323,17 +398,27 @@
       poly(ctx, [P(c + 1.3, r + 0.88, 6), P(c + 1.86, r + 0.88, 6), P(c + 1.86, r + 0.88, 20), P(c + 1.3, r + 0.88, 20)], '#B98A5C', INK, 1);
       const [kx, ky] = P(c + 1.58, r + 0.88, 13);
       ctx.fillStyle = '#F2C14E'; ctx.beginPath(); ctx.arc(kx, ky, 1.6, 0, Math.PI * 2); ctx.fill();
-      box(ctx, c + 0.22, r + 0.2, 0.58, 0.26, 2, shade('#F8FAFC', '#CBD5E1', '#CBD5E1'), 26);   // keyboard
-      box(ctx, c + 1.42, r + 0.38, 0.16, 0.16, 8, shade('#64748B', '#475569', '#475569'), 26); // monitor stand
-      box(ctx, c + 1.12, r + 0.3, 0.76, 0.1, 30, shade('#475569', '#CBD5E1', '#94A3B8'), 34);  // monitor (its back to us)
-      if (GLOW[state]) {                               // the screen's light spills over its top edge
-        const [x1, y1] = P(c + 1.14, r + 0.3, 66), [x2, y2] = P(c + 1.86, r + 0.3, 66);
-        ctx.strokeStyle = GLOW[state]; ctx.lineWidth = 3;
+      const pose = worker ? workPose(worker) : null;
+      const lit = worker && worker.pose === 'sit' ? GLOW[worker.state] : null;
+      // the laptop's back-left corner on the desk top. The person is drawn facing straight down the screen,
+      // which on this grid is +x and +y alike, so the laptop sits diagonally in front of the seat, not at +y only.
+      const lx = c + 0.88, ly = r + 0.24;
+      box(ctx, lx, ly, 0.64, 0.42, 2, shade('#E2E8F0', '#94A3B8', '#64748B'), TOP);
+      if (pose === 'type') typingArms(ctx, worker, lx, ly);
+      // the lid, leaning back from the base's front edge, a logo on its back
+      poly(ctx, [P(lx, ly + 0.42, TOP + 2), P(lx + 0.64, ly + 0.42, TOP + 2), P(lx + 0.64, ly + 0.47, TOP + 13), P(lx, ly + 0.47, TOP + 13)], '#A3B1C2', INK, 1.5);
+      const [gx, gy] = P(lx + 0.32, ly + 0.45, TOP + 7);
+      ctx.fillStyle = lit || '#CBD5E1'; ctx.beginPath(); ctx.arc(gx, gy, 2.6, 0, Math.PI * 2); ctx.fill();
+      if (lit) {                                       // the screen's light spills over the lid
+        const [x1, y1] = P(lx + 0.03, ly + 0.47, TOP + 14), [x2, y2] = P(lx + 0.61, ly + 0.47, TOP + 14);
+        ctx.strokeStyle = lit; ctx.lineWidth = 3;
         ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
       }
+      if (pose === 'type') codeBits(ctx, worker, lx, ly, now);
+      if (pose === 'read') readingSheet(ctx, worker, lx, ly, now);
       const [left, right] = deskItems(i);
-      DESK_ITEM[left](ctx, c + 0.3, r + 0.55);
-      DESK_ITEM[right](ctx, c + 1.45, r + 0.6);
+      DESK_ITEM[left](ctx, c + 0.25, r + 0.45);
+      DESK_ITEM[right](ctx, c + 1.62, r + 0.55);
     },
     rack(ctx, f, _, now, robot) {
       box(ctx, 0.08, 3.08, 0.84, 1.84, 96, shade('#475569', '#334155', '#1E293B'));
@@ -407,8 +492,9 @@
   };
 
   function chair(ctx, seat) {
-    box(ctx, seat.x + 0.25, seat.y + 0.3, 0.5, 0.45, 14, shade('#5EEAD4', '#2DD4BF', '#14B8A6'));
-    box(ctx, seat.x + 0.25, seat.y + 0.15, 0.5, 0.12, 30, shade('#5EEAD4', '#2DD4BF', '#14B8A6'), 10);
+    const y = seat.y + SEAT_FORWARD;                   // pulled up to the desk, like whoever sits on it
+    box(ctx, seat.x + 0.25, y + 0.3, 0.5, 0.45, 14, shade('#5EEAD4', '#2DD4BF', '#14B8A6'));
+    box(ctx, seat.x + 0.25, y + 0.15, 0.5, 0.12, 30, shade('#5EEAD4', '#2DD4BF', '#14B8A6'), 10);
   }
 
   function beanbag(ctx, p, i) {
@@ -420,13 +506,14 @@
 
   // ---- people
   function character(ctx, c, now) {
-    const [X, Y0] = P(c.x + 0.5, c.y + 0.5);
-    const look = KINDS[c.kind] || KINDS.claude;
-    const { skin, hair, hairStyle, glasses } = lookOf(c.id);
-    const t = c.phase;
     const walking = c.pose === 'walk';
     const dozing = c.pose === 'doze';                 // asleep over its desk
     const seated = c.pose === 'sit' || dozing;
+    const [X, Y0] = P(c.x + 0.5, c.y + 0.5 + (seated ? SEAT_FORWARD : 0));
+    const look = KINDS[c.kind] || KINDS.claude;
+    const { skin, hair, hairStyle, glasses } = lookOf(c.id);
+    const work = workPose(c);
+    const t = c.phase;
     const napping = c.pose === 'nap';
     const asleep = napping || dozing;
     const bob = walking ? Math.abs(Math.sin(t * 9)) * 2.5 : asleep ? Math.sin(t * 1.5) * 1 : 0;
@@ -453,15 +540,15 @@
     // body
     ctx.fillStyle = look.main;
     rrect(ctx, X - 11, Y - 28, 22, 20, 8); ctx.fill(); ctx.stroke();
-    // arms: typing, a hand on the chin when thinking, a mug while waiting, swinging when walking
+    // arms: a hand on the chin when thinking, a mug while waiting, swinging when walking.
+    // Typing and reading arms reach over the desk, so the desk draws those (see typingArms, readingSheet).
     const arm = (ax, ay) => { ctx.fillStyle = skin; ctx.beginPath(); ctx.arc(ax, ay, 3.6, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); };
     if (dozing) {                                      // arms folded on the desk as a pillow
       arm(X - 8, Y - 13);
       arm(X + 8, Y - 13);
-    } else if (seated && c.state === 'tool') {
-      arm(X - 7, Y - 12 + (Math.sin(t * 22) > 0 ? -2 : 0));
-      arm(X + 7, Y - 12 + (Math.sin(t * 22) > 0 ? 0 : -2));
-    } else if (seated && c.state === 'thinking') {
+    } else if (work === 'type' || work === 'read') {
+      // drawn by the desk
+    } else if (work === 'think') {
       arm(X - 9, Y - 13);
       arm(X + 5 * side, Y - 32);
     } else if (c.state === 'waiting' && !walking && front) {
@@ -475,7 +562,8 @@
     }
 
     // head: dozing, it hangs low and tilts towards the desk
-    const HX = X, HY = Y - (dozing ? 34 : 42);
+    // typing, the head nods along a little
+    const HX = X, HY = Y - (dozing ? 34 : 42) + (work === 'type' && Math.sin(t * 10) > 0.5 ? 1 : 0);
     ctx.save();
     if (dozing) { ctx.translate(HX, HY); ctx.rotate(0.35 * side); ctx.translate(-HX, -HY); }
     if (c.kind === 'claude') {                         // the hood behind the head
@@ -650,15 +738,15 @@
     const counts = tally(people);
     floor(ctx);
     walls(ctx, now, counts);
-    // who works at which seat: their state lights that desk's screen
-    const working = new Map(people.filter((c) => c.pose === 'sit').map((c) => [`${c.x},${c.y}`, c.state]));
+    // who sits at which seat: the desk in front of it draws their laptop and hands
+    const seated = new Map(people.filter((c) => c.pose === 'sit' || c.pose === 'doze').map((c) => [`${c.x},${c.y}`, c]));
     const items = [];
     // depth = x + y of the thing's centre: larger is nearer the viewer
     for (const f of World.FURNITURE) {
       const cx = f.cells.reduce((s, [x]) => s + x, 0) / f.cells.length + 0.5;
       const cy = f.cells.reduce((s, [, y]) => s + y, 0) / f.cells.length + 0.5;
-      const state = f.kind === 'desk' ? working.get(`${f.cells[0][0]},${f.cells[0][1] - 1}`) || null : null;
-      items.push({ depth: cx + cy, draw: () => FURNITURE_DRAW[f.kind](ctx, f, state, now, office.robot, counts) });
+      const worker = f.kind === 'desk' ? seated.get(`${f.cells[0][0]},${f.cells[0][1] - 1}`) || null : null;
+      items.push({ depth: cx + cy, draw: () => FURNITURE_DRAW[f.kind](ctx, f, worker, now, office.robot, counts) });
     }
     for (const d of World.DESKS) items.push({ depth: d.seat.x + d.seat.y + 0.8, draw: () => chair(ctx, d.seat) });
     World.NAP_SPOTS.forEach((p, i) => items.push({ depth: p.x + p.y + 0.8, draw: () => beanbag(ctx, p, i) }));
@@ -698,5 +786,5 @@
     return best;
   }
 
-  root.Draw = { draw, hit, skyAt, tally, deskItems, lookOf, SCENE_W, SCENE_H };
+  root.Draw = { draw, hit, skyAt, tally, deskItems, lookOf, workPose, SCENE_W, SCENE_H };
 })(typeof window !== 'undefined' ? window : globalThis);
